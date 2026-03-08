@@ -86,15 +86,19 @@ export class BalanceMonitor {
   async checkBalance(): Promise<BalanceInfo> {
     const now = Date.now();
 
-    // Use cache if valid
-    if (this.cachedBalance !== null && now - this.cachedAt < CACHE_TTL_MS) {
+    // Use cache only when balance is positive and still fresh.
+    // Zero balance is never cached — always re-fetch so a funded wallet is
+    // detected on the next request without waiting for cache expiry.
+    if (this.cachedBalance !== null && this.cachedBalance > 0n && now - this.cachedAt < CACHE_TTL_MS) {
       return this.buildInfo(this.cachedBalance);
     }
 
     // Fetch from RPC
     const balance = await this.fetchBalance();
-    this.cachedBalance = balance;
-    this.cachedAt = now;
+    if (balance > 0n) {
+      this.cachedBalance = balance;
+      this.cachedAt = now;
+    }
 
     return this.buildInfo(balance);
   }
