@@ -284,6 +284,31 @@ export function classifyByRules(
     };
   }
 
+  // Content creation override: if user wants to write/create content → upgrade to COMPLEX
+  // This ensures posts, articles, etc. get a smarter model than simple chat replies
+  const contentMatches = config.contentCreationKeywords.filter((kw) =>
+    userText.includes(kw.toLowerCase()),
+  );
+  const hasCreativeAction =
+    config.creativeKeywords.some((kw) => userText.includes(kw.toLowerCase())) ||
+    config.imperativeVerbs.some((kw) => userText.includes(kw.toLowerCase()));
+
+  if (contentMatches.length >= 1 && hasCreativeAction) {
+    const confidence = calibrateConfidence(
+      Math.max(weightedScore, 0.2),
+      config.confidenceSteepness,
+    );
+    signals.push(`content-creation (${contentMatches.slice(0, 2).join(", ")})`);
+    return {
+      score: weightedScore,
+      tier: "COMPLEX",
+      confidence: Math.max(confidence, 0.85),
+      signals,
+      agenticScore,
+      dimensions,
+    };
+  }
+
   // Map weighted score to tier using boundaries
   const { simpleMedium, mediumComplex, complexReasoning } = config.tierBoundaries;
   let tier: Tier;

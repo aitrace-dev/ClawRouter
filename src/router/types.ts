@@ -52,6 +52,8 @@ export type ScoringConfig = {
   domainSpecificKeywords: string[];
   // Agentic task detection keywords
   agenticTaskKeywords: string[];
+  // Content creation keywords — triggers upgrade to COMPLEX tier
+  contentCreationKeywords: string[];
   // Weighted scoring parameters
   dimensionWeights: Record<string, number>;
   tierBoundaries: {
