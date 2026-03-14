@@ -268,25 +268,87 @@ function stripThinkingTokens(content: string): string {
  */
 function convertToAnthropicFormat(parsed: Record<string, unknown>): Record<string, unknown> {
   const messages = (parsed.messages as ChatMessage[]) || [];
-  
-  // Extract system message
+
+  // Extract system message and convert messages
   let system: string | undefined;
-  const nonSystemMessages: Array<{ role: string; content: string | unknown }> = [];
-  
+  const anthropicMessages: Array<{ role: string; content: unknown }> = [];
+
   for (const msg of messages) {
     if (msg.role === "system") {
       system = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
-    } else {
-      nonSystemMessages.push({
-        role: msg.role === "assistant" ? "assistant" : "user",
-        content: msg.content,
+      continue;
+    }
+
+    const typedMsg = msg as MessageWithTools;
+
+    // Convert assistant messages with tool_calls → tool_use content blocks
+    if (msg.role === "assistant" && typedMsg.tool_calls && Array.isArray(typedMsg.tool_calls)) {
+      const contentBlocks: Array<Record<string, unknown>> = [];
+      // Include any text content first
+      if (msg.content && typeof msg.content === "string" && msg.content.trim()) {
+        contentBlocks.push({ type: "text", text: msg.content });
+      }
+      for (const tc of typedMsg.tool_calls) {
+        const fn = tc.function as Record<string, unknown> | undefined;
+        if (fn) {
+          let input: unknown = {};
+          if (typeof fn.arguments === "string") {
+            try { input = JSON.parse(fn.arguments as string); } catch { input = {}; }
+          } else if (fn.arguments) {
+            input = fn.arguments;
+          }
+          contentBlocks.push({
+            type: "tool_use",
+            id: tc.id || `tool_${Date.now()}`,
+            name: fn.name,
+            input,
+          });
+        }
+      }
+      anthropicMessages.push({ role: "assistant", content: contentBlocks });
+      continue;
+    }
+
+    // Convert tool role messages → tool_result content blocks in user message
+    if (msg.role === "tool") {
+      const toolContent = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+      anthropicMessages.push({
+        role: "user",
+        content: [{
+          type: "tool_result",
+          tool_use_id: typedMsg.tool_call_id || `tool_${Date.now()}`,
+          content: toolContent,
+        }],
       });
+      continue;
+    }
+
+    // Regular message
+    anthropicMessages.push({
+      role: msg.role === "assistant" ? "assistant" : "user",
+      content: msg.content,
+    });
+  }
+
+  // Merge consecutive same-role messages (Anthropic requires alternating roles)
+  const mergedMessages: Array<{ role: string; content: unknown }> = [];
+  for (const msg of anthropicMessages) {
+    const prev = mergedMessages[mergedMessages.length - 1];
+    if (prev && prev.role === msg.role) {
+      // Merge content into arrays
+      const prevBlocks = Array.isArray(prev.content) ? prev.content :
+        (typeof prev.content === "string" ? [{ type: "text", text: prev.content }] : [prev.content]);
+      const curBlocks = Array.isArray(msg.content) ? msg.content :
+        (typeof msg.content === "string" ? [{ type: "text", text: msg.content }] : [msg.content]);
+      prev.content = [...prevBlocks, ...curBlocks];
+    } else {
+      mergedMessages.push({ ...msg });
     }
   }
 
   const result: Record<string, unknown> = {
     model: parsed.model,
-    messages: nonSystemMessages,
+    messages: mergedMessages,
     max_tokens: (parsed.max_tokens as number) || 4096,
   };
 
@@ -294,7 +356,42 @@ function convertToAnthropicFormat(parsed: Record<string, unknown>): Record<strin
   if (parsed.stream) result.stream = true;
   if (parsed.temperature !== undefined) result.temperature = parsed.temperature;
   if (parsed.top_p !== undefined) result.top_p = parsed.top_p;
-  if (parsed.tools) result.tools = parsed.tools;
+
+  // Convert OpenAI tools format → Anthropic tools format
+  if (parsed.tools && Array.isArray(parsed.tools)) {
+    result.tools = (parsed.tools as Array<Record<string, unknown>>).map(tool => {
+      if (tool.type === "function" && tool.function) {
+        const fn = tool.function as Record<string, unknown>;
+        return {
+          name: fn.name,
+          description: fn.description,
+          input_schema: fn.parameters || { type: "object", properties: {} },
+        };
+      }
+      // Already in Anthropic format or unknown — pass through
+      return tool;
+    });
+  }
+
+  // Convert tool_choice format
+  if (parsed.tool_choice !== undefined) {
+    const tc = parsed.tool_choice;
+    if (tc === "auto") {
+      result.tool_choice = { type: "auto" };
+    } else if (tc === "none") {
+      // Anthropic: omit tool_choice entirely for "none" behavior
+    } else if (tc === "required") {
+      result.tool_choice = { type: "any" };
+    } else if (typeof tc === "object" && tc !== null) {
+      const tcObj = tc as Record<string, unknown>;
+      if (tcObj.type === "function" && tcObj.function) {
+        const fn = tcObj.function as Record<string, unknown>;
+        result.tool_choice = { type: "tool", name: fn.name };
+      } else {
+        result.tool_choice = tc;
+      }
+    }
+  }
 
   return result;
 }
@@ -303,9 +400,34 @@ function convertToAnthropicFormat(parsed: Record<string, unknown>): Record<strin
  * Convert Anthropic response to OpenAI format.
  */
 function convertAnthropicResponseToOpenAI(anthropicData: Record<string, unknown>): Record<string, unknown> {
-  const content = anthropicData.content as Array<{ type: string; text?: string }> | undefined;
+  const content = anthropicData.content as Array<{ type: string; text?: string; id?: string; name?: string; input?: unknown }> | undefined;
   const textContent = content?.filter(b => b.type === "text").map(b => b.text).join("") || "";
-  
+  const toolUseBlocks = content?.filter(b => b.type === "tool_use") || [];
+
+  const message: Record<string, unknown> = {
+    role: "assistant",
+    content: textContent || null,
+  };
+
+  // Convert tool_use blocks → OpenAI tool_calls
+  if (toolUseBlocks.length > 0) {
+    message.tool_calls = toolUseBlocks.map(block => ({
+      id: block.id || `call_${Date.now()}`,
+      type: "function",
+      function: {
+        name: block.name,
+        arguments: typeof block.input === "string" ? block.input : JSON.stringify(block.input || {}),
+      },
+    }));
+  }
+
+  // Map stop_reason
+  let finishReason = "stop";
+  if (anthropicData.stop_reason === "tool_use") finishReason = "tool_calls";
+  else if (anthropicData.stop_reason === "end_turn") finishReason = "stop";
+  else if (anthropicData.stop_reason === "max_tokens") finishReason = "length";
+  else if (anthropicData.stop_reason) finishReason = anthropicData.stop_reason as string;
+
   return {
     id: (anthropicData.id as string) || `chatcmpl-${Date.now()}`,
     object: "chat.completion",
@@ -313,11 +435,8 @@ function convertAnthropicResponseToOpenAI(anthropicData: Record<string, unknown>
     model: anthropicData.model,
     choices: [{
       index: 0,
-      message: {
-        role: "assistant",
-        content: textContent,
-      },
-      finish_reason: anthropicData.stop_reason === "end_turn" ? "stop" : (anthropicData.stop_reason || "stop"),
+      message,
+      finish_reason: finishReason,
     }],
     usage: anthropicData.usage ? {
       prompt_tokens: (anthropicData.usage as Record<string, number>).input_tokens || 0,
