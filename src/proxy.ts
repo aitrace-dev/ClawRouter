@@ -230,6 +230,55 @@ function normalizeMessagesForGoogle(messages: ChatMessage[]): ChatMessage[] {
   return messages;
 }
 
+/**
+ * Inject dummy thought signatures into tool_call objects for Google's Gemini 3+ models.
+ * Google requires extra_content.google.thought_signature on function call parts in
+ * conversation history. OpenClaw/OpenAI clients strip this non-standard field.
+ * Using the "skip_thought_signature_validator" bypass sentinel avoids 400 errors.
+ * See: https://ai.google.dev/gemini-api/docs/thought-signatures
+ */
+function injectGoogleThoughtSignatures(messages: ChatMessage[]): ChatMessage[] {
+  if (!messages || messages.length === 0) return messages;
+  const BYPASS_SIGNATURE = "skip_thought_signature_validator";
+  let hasChanges = false;
+
+  const patched = messages.map((msg) => {
+    const typedMsg = msg as MessageWithTools;
+    if (typedMsg.role !== "assistant" || !typedMsg.tool_calls || !Array.isArray(typedMsg.tool_calls)) {
+      return msg;
+    }
+
+    let msgChanged = false;
+    const patchedToolCalls = typedMsg.tool_calls.map((tc) => {
+      const tcAny = tc as Record<string, unknown>;
+      // Check if extra_content.google.thought_signature already exists
+      const existing = tcAny.extra_content as Record<string, unknown> | undefined;
+      const google = existing?.google as Record<string, unknown> | undefined;
+      if (google?.thought_signature) return tc; // Already has signature
+
+      msgChanged = true;
+      return {
+        ...tc,
+        extra_content: {
+          ...(existing || {}),
+          google: {
+            ...(google || {}),
+            thought_signature: BYPASS_SIGNATURE,
+          },
+        },
+      };
+    });
+
+    if (msgChanged) {
+      hasChanges = true;
+      return { ...msg, tool_calls: patchedToolCalls } as ChatMessage;
+    }
+    return msg;
+  });
+
+  return hasChanges ? patched : messages;
+}
+
 function isGoogleModel(modelId: string): boolean {
   return modelId.startsWith("google/") || modelId.startsWith("gemini");
 }
@@ -656,6 +705,10 @@ async function tryModelRequest(
 
     if (isGoogleModel(modelId) && Array.isArray(parsed.messages)) {
       parsed.messages = normalizeMessagesForGoogle(parsed.messages as ChatMessage[]);
+      // Inject dummy thought signatures for Google's Gemini 3+ models.
+      // Google requires thought_signature on function call parts in conversation history.
+      // OpenClaw strips the non-standard extra_content field, so we inject the bypass sentinel.
+      parsed.messages = injectGoogleThoughtSignatures(parsed.messages as ChatMessage[]);
     }
 
     if (parsed.thinking && Array.isArray(parsed.messages)) {
