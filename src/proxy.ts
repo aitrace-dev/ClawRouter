@@ -117,7 +117,7 @@ async function checkExistingProxy(port: number): Promise<boolean> {
 }
 
 const PROVIDER_ERROR_PATTERNS = [
-  /billing/i, /insufficient.*balance/i, /credits/i, /quota.*exceeded/i,
+  /billing/i, /insufficient.*balance/i, /credits/i, /quota/i, /exhausted/i,
   /rate.*limit/i, /model.*unavailable/i, /service.*unavailable/i,
   /capacity/i, /overloaded/i, /temporarily.*unavailable/i,
   /api.*key.*invalid/i, /authentication.*failed/i,
@@ -128,6 +128,9 @@ const FALLBACK_STATUS_CODES = [400, 401, 402, 403, 404, 405, 429, 500, 502, 503,
 function isProviderError(status: number, body: string): boolean {
   if (!FALLBACK_STATUS_CODES.includes(status)) return false;
   if (status >= 500) return true;
+  // 429 is always a rate limit — always trigger fallback regardless of body text
+  // (Google says "Resource has been exhausted", Anthropic says "rate limit", etc.)
+  if (status === 429) return true;
   return PROVIDER_ERROR_PATTERNS.some((pattern) => pattern.test(body));
 }
 
