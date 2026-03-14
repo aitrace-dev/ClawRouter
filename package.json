@@ -1,7 +1,7 @@
 {
-  "name": "@blockrun/clawrouter",
-  "version": "0.12.39",
-  "description": "Smart LLM router — save 92% on inference costs. 41+ models, one wallet, x402 micropayments.",
+  "name": "@aitrace/clawrouter",
+  "version": "1.0.0",
+  "description": "Smart LLM router — use your own API keys with intelligent cost-based model routing.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -51,33 +51,19 @@
     "smart-routing",
     "ai",
     "openclaw",
-    "blockrun",
-    "x402",
-    "usdc",
     "cost-optimization",
     "openai",
     "anthropic",
     "gemini",
-    "deepseek",
-    "usdc-hackathon-winner",
-    "agentic-commerce"
+    "deepseek"
   ],
-  "author": "BlockRun <hello@blockrun.ai>",
+  "author": "aitrace-dev",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/BlockRunAI/ClawRouter.git"
+    "url": "git+https://github.com/aitrace-dev/ClawRouter.git"
   },
-  "dependencies": {
-    "@scure/bip32": "^1.6.0",
-    "@scure/bip39": "^1.5.0",
-    "@solana/kit": "^5.0.0",
-    "@x402/evm": "^2.4.0",
-    "@x402/fetch": "^2.4.0",
-    "@x402/svm": "^2.4.0",
-    "ethers": "^6.16.0",
-    "viem": "^2.39.3"
-  },
+  "dependencies": {},
   "peerDependencies": {
     "openclaw": ">=2025.1.0"
   },

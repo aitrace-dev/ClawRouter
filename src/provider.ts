@@ -1,9 +1,9 @@
 /**
- * BlockRun ProviderPlugin for OpenClaw
+ * ClawRouter ProviderPlugin for OpenClaw
  *
- * Registers BlockRun as an LLM provider in OpenClaw.
- * Uses a local x402 proxy to handle micropayments transparently —
- * pi-ai sees a standard OpenAI-compatible API at localhost.
+ * Registers ClawRouter as an LLM provider in OpenClaw.
+ * Uses a local proxy to route requests to upstream provider APIs
+ * (Google, Anthropic, OpenAI) using direct API keys from the environment.
  */
 
 import type { ProviderPlugin } from "./types.js";
@@ -27,27 +27,27 @@ export function getActiveProxy(): ProxyHandle | null {
 }
 
 /**
- * BlockRun provider plugin definition.
+ * ClawRouter provider plugin definition.
  */
-export const blockrunProvider: ProviderPlugin = {
-  id: "blockrun",
-  label: "BlockRun",
-  docsPath: "https://blockrun.ai/docs",
-  aliases: ["br"],
-  envVars: ["BLOCKRUN_WALLET_KEY"],
+export const clawrouterProvider: ProviderPlugin = {
+  id: "clawrouter",
+  label: "ClawRouter",
+  docsPath: "https://github.com/openclaw-ai/ClawRouter",
+  aliases: ["cr"],
+  envVars: ["GOOGLE_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
 
   // Model definitions — dynamically set to proxy URL
   get models() {
     if (!activeProxy) {
-      // Fallback: point to BlockRun API directly (won't handle x402, but
-      // allows config loading before proxy starts)
-      return buildProviderModels("https://blockrun.ai/api");
+      // Fallback: point to localhost default before proxy starts.
+      // The proxy must be running for requests to succeed.
+      return buildProviderModels("http://127.0.0.1:8402");
     }
     return buildProviderModels(activeProxy.baseUrl);
   },
 
-  // No auth required — the x402 proxy handles wallet-based payments internally.
-  // The proxy auto-generates a wallet on first run and stores it at
-  // ~/.openclaw/blockrun/wallet.key. Users just fund that wallet with USDC.
+  // No auth wizard needed — API keys are provided via environment variables
+  // or OpenClaw config. The proxy reads them at startup and forwards
+  // requests to the appropriate upstream provider.
   auth: [],
 };

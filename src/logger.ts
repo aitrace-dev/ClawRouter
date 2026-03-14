@@ -26,6 +26,8 @@ export type UsageEntry = {
   partnerId?: string;
   /** Partner service name (e.g., "AttentionVC") — only set for partner API calls */
   service?: string;
+  /** Routing reasoning explanation */
+  reasoning?: string;
 };
 
 const LOG_DIR = join(homedir(), ".openclaw", "blockrun", "logs");
