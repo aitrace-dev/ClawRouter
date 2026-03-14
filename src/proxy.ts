@@ -607,13 +607,22 @@ function buildUpstreamUrl(
   // Also needs full model IDs (e.g., claude-sonnet-4-20250514)
   if (provider === "anthropic") {
     const ANTHROPIC_MODEL_MAP: Record<string, string> = {
+      // Current generation (4.6)
+      "claude-sonnet-4.6": "claude-sonnet-4-6",
+      "claude-sonnet-4-6": "claude-sonnet-4-6",
+      "claude-opus-4.6": "claude-opus-4-6",
+      "claude-opus-4-6": "claude-opus-4-6",
+      // Haiku 4.5
+      "claude-haiku-4.5": "claude-haiku-4-5-20251001",
+      "claude-haiku-4-5": "claude-haiku-4-5-20251001",
+      // Legacy mappings
       "claude-sonnet-4": "claude-sonnet-4-20250514",
       "claude-opus-4": "claude-opus-4-20250514",
-      "claude-opus-4.5": "claude-opus-4-20250514", // fallback
-      "claude-haiku-4.5": "claude-haiku-4-20250414",
-      "claude-haiku-3.5": "claude-haiku-4-20250414",
-      "claude-3-5-haiku": "claude-haiku-4-20250414",
-      "claude-3.5-haiku": "claude-haiku-4-20250414",
+      "claude-opus-4.5": "claude-opus-4-5-20251101",
+      "claude-opus-4-5": "claude-opus-4-5-20251101",
+      "claude-haiku-3.5": "claude-haiku-4-5-20251001",
+      "claude-3-5-haiku": "claude-haiku-4-5-20251001",
+      "claude-3.5-haiku": "claude-haiku-4-5-20251001",
     };
     const mappedModel = ANTHROPIC_MODEL_MAP[actualModelId] || actualModelId;
     return {
