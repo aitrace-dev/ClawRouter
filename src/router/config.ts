@@ -1038,150 +1038,134 @@ export const DEFAULT_ROUTING_CONFIG: RoutingConfig = {
     confidenceThreshold: 0.7,
   },
 
-  // Auto (balanced) tier configs - current default smart routing
+  // Auto (balanced) tier configs — Gemini-first, Anthropic as last-resort quota fallback
   tiers: {
     SIMPLE: {
-      primary: "moonshot/kimi-k2.5", // $0.60/$3.00 - best quality/price for simple tasks
+      primary: "google/gemini-2.5-flash-lite", // $0.10/$0.40 — cheapest, 1M context
       fallback: [
-        "google/gemini-2.5-flash", // 60% retention (best), fast growth (+800%)
-        "google/gemini-2.5-flash-lite", // 1M context, ultra cheap ($0.10/$0.40)
-        "deepseek/deepseek-chat", // 41% retention
-        "nvidia/gpt-oss-120b", // FREE fallback
+        "google/gemini-2.5-flash", // $0.30/$2.50 — fast, capable
+        "google/gemini-3-flash-preview", // $0.50/$3.00 — newer flash
+        "anthropic/claude-haiku-4.5", // $1.00/$5.00 — last resort
       ],
     },
     MEDIUM: {
-      primary: "moonshot/kimi-k2.5", // $0.50/$2.40 - strong tool use, proper function call format
+      primary: "google/gemini-2.5-flash", // $0.30/$2.50 — fast, good quality
       fallback: [
-        "deepseek/deepseek-chat", // 41% retention
-        "google/gemini-2.5-flash", // 60% retention, cheap fast model
-        "google/gemini-2.5-flash-lite", // 1M context, ultra cheap ($0.10/$0.40)
-        "xai/grok-4-1-fast-non-reasoning", // Upgraded Grok 4.1
+        "google/gemini-3-flash-preview", // $0.50/$3.00 — newer
+        "google/gemini-2.5-flash-lite", // $0.10/$0.40 — ultra cheap fallback
+        "google/gemini-2.5-pro", // $1.25/$10.00 — upgrade if flash fails
+        "anthropic/claude-haiku-4.5", // $1.00/$5.00 — last resort
       ],
     },
     COMPLEX: {
-      primary: "google/gemini-3.1-pro", // Newest Gemini 3.1 - upgraded from 3.0
+      primary: "google/gemini-3.1-pro", // $2.00/$12.00 — newest, best quality
       fallback: [
-        "google/gemini-2.5-flash", // 60% retention, cheap failsafe before expensive models
-        "google/gemini-2.5-flash-lite", // CRITICAL: 1M context, ultra-cheap failsafe ($0.10/$0.40)
-        "google/gemini-3-pro-preview", // 3.0 fallback
-        "google/gemini-2.5-pro",
-        "deepseek/deepseek-chat",
-        "xai/grok-4-0709",
-        "openai/gpt-5.4", // Newest flagship, same price as 4o
-        "openai/gpt-4o",
-        "anthropic/claude-sonnet-4.6",
+        "google/gemini-3-pro-preview", // $2.00/$12.00 — 3.0 fallback
+        "google/gemini-2.5-pro", // $1.25/$10.00 — proven pro model
+        "google/gemini-2.5-flash", // $0.30/$2.50 — cheap failsafe
+        "anthropic/claude-sonnet-4.6", // $3.00/$15.00 — last resort
       ],
     },
     REASONING: {
-      primary: "xai/grok-4-1-fast-reasoning", // Upgraded Grok 4.1 reasoning $0.20/$0.50
+      primary: "google/gemini-2.5-pro", // $1.25/$10.00 — strong reasoning, 1M context
       fallback: [
-        "deepseek/deepseek-reasoner", // Cheap reasoning model
-        "openai/o4-mini", // Newer and cheaper than o3 ($1.10 vs $2.00)
-        "openai/o3",
+        "google/gemini-3.1-pro", // $2.00/$12.00 — newest pro
+        "google/gemini-3-pro-preview", // $2.00/$12.00 — 3.0 fallback
+        "google/gemini-2.5-flash", // $0.30/$2.50 — cheap reasoning fallback
+        "anthropic/claude-sonnet-4.6", // $3.00/$15.00 — last resort
       ],
     },
   },
 
-  // Eco tier configs - absolute cheapest (blockrun/eco)
+  // Eco tier configs — absolute cheapest, Gemini only
   ecoTiers: {
     SIMPLE: {
-      primary: "nvidia/gpt-oss-120b", // FREE! $0.00/$0.00
-      fallback: ["google/gemini-2.5-flash-lite", "google/gemini-2.5-flash", "deepseek/deepseek-chat"],
+      primary: "google/gemini-2.5-flash-lite", // $0.10/$0.40
+      fallback: ["google/gemini-2.5-flash"],
     },
     MEDIUM: {
-      primary: "google/gemini-2.5-flash-lite", // $0.10/$0.40 - cheapest capable with 1M context
-      fallback: ["google/gemini-2.5-flash", "deepseek/deepseek-chat", "nvidia/gpt-oss-120b"],
+      primary: "google/gemini-2.5-flash-lite", // $0.10/$0.40
+      fallback: ["google/gemini-2.5-flash", "google/gemini-3-flash-preview"],
     },
     COMPLEX: {
-      primary: "google/gemini-2.5-flash-lite", // $0.10/$0.40 - 1M context handles complexity
-      fallback: ["google/gemini-2.5-flash", "deepseek/deepseek-chat", "xai/grok-4-0709"],
+      primary: "google/gemini-2.5-flash", // $0.30/$2.50
+      fallback: ["google/gemini-2.5-flash-lite", "google/gemini-2.5-pro"],
     },
     REASONING: {
-      primary: "xai/grok-4-1-fast-reasoning", // $0.20/$0.50
-      fallback: ["deepseek/deepseek-reasoner"],
+      primary: "google/gemini-2.5-pro", // $1.25/$10.00
+      fallback: ["google/gemini-2.5-flash", "google/gemini-2.5-flash-lite"],
     },
   },
 
-  // Premium tier configs - best quality (blockrun/premium)
-  // codex=complex coding, kimi=simple coding, sonnet=reasoning/instructions, opus=architecture/PM/audits
+  // Premium tier configs — best Gemini models, Anthropic as fallback
   premiumTiers: {
     SIMPLE: {
-      primary: "moonshot/kimi-k2.5", // $0.60/$3.00 - good for simple coding
+      primary: "google/gemini-2.5-flash", // $0.30/$2.50
       fallback: [
-        "google/gemini-2.5-flash", // 60% retention, fast growth
-        "anthropic/claude-haiku-4.5",
+        "google/gemini-3-flash-preview",
         "google/gemini-2.5-flash-lite",
-        "deepseek/deepseek-chat",
+        "anthropic/claude-haiku-4.5",
       ],
     },
     MEDIUM: {
-      primary: "openai/gpt-5.2-codex", // $2.50/$10 - strong coding for medium tasks
+      primary: "google/gemini-3-flash-preview", // $0.50/$3.00
       fallback: [
-        "moonshot/kimi-k2.5",
-        "google/gemini-2.5-flash", // 60% retention, good coding capability
         "google/gemini-2.5-pro",
-        "xai/grok-4-0709",
-        "anthropic/claude-sonnet-4.6",
+        "google/gemini-2.5-flash",
+        "anthropic/claude-haiku-4.5",
       ],
     },
     COMPLEX: {
-      primary: "anthropic/claude-opus-4.6", // Best quality for complex tasks
+      primary: "google/gemini-3.1-pro", // $2.00/$12.00
       fallback: [
-        "openai/gpt-5.4", // Newest flagship
-        "openai/gpt-5.2-codex",
-        "anthropic/claude-opus-4.6",
-        "anthropic/claude-sonnet-4.6",
-        "google/gemini-3.1-pro", // Newest Gemini
         "google/gemini-3-pro-preview",
-        "moonshot/kimi-k2.5",
+        "google/gemini-2.5-pro",
+        "anthropic/claude-sonnet-4.6",
       ],
     },
     REASONING: {
-      primary: "anthropic/claude-sonnet-4.6", // $3/$15 - best for reasoning/instructions
+      primary: "google/gemini-2.5-pro", // $1.25/$10.00
       fallback: [
-        "anthropic/claude-opus-4.6",
-        "anthropic/claude-opus-4.6",
-        "openai/o4-mini", // Newer and cheaper than o3 ($1.10 vs $2.00)
-        "openai/o3",
-        "xai/grok-4-1-fast-reasoning",
+        "google/gemini-3.1-pro",
+        "google/gemini-3-pro-preview",
+        "anthropic/claude-sonnet-4.6",
       ],
     },
   },
 
-  // Agentic tier configs - models that excel at multi-step autonomous tasks
+  // Agentic tier configs — tool-heavy tasks, Gemini-first
   agenticTiers: {
     SIMPLE: {
-      primary: "moonshot/kimi-k2.5", // Cheaper than Haiku ($0.5/$2.4 vs $1/$5), larger context
+      primary: "google/gemini-2.5-flash", // Good tool support
       fallback: [
-        "anthropic/claude-haiku-4.5",
-        "xai/grok-4-1-fast-non-reasoning",
-        "openai/gpt-4o-mini",
+        "google/gemini-2.5-flash-lite",
+        "google/gemini-3-flash-preview",
+        "anthropic/claude-haiku-4.5", // Last resort
       ],
     },
     MEDIUM: {
-      primary: "moonshot/kimi-k2.5", // $0.50/$2.40 - strong tool use, handles function calls correctly
+      primary: "google/gemini-2.5-flash", // Good tool support
       fallback: [
-        "anthropic/claude-haiku-4.5",
-        "deepseek/deepseek-chat",
-        "xai/grok-4-1-fast-non-reasoning",
+        "google/gemini-3-flash-preview",
+        "google/gemini-2.5-pro",
+        "anthropic/claude-haiku-4.5", // Last resort
       ],
     },
     COMPLEX: {
-      primary: "anthropic/claude-sonnet-4.6",
+      primary: "google/gemini-3.1-pro", // Strong tool use
       fallback: [
-        "anthropic/claude-opus-4.6", // Latest Opus - best agentic
-        "openai/gpt-5.4", // Newest flagship
-        "google/gemini-3.1-pro", // Newest Gemini
         "google/gemini-3-pro-preview",
-        "xai/grok-4-0709",
+        "google/gemini-2.5-pro",
+        "google/gemini-2.5-flash",
+        "anthropic/claude-sonnet-4.6", // Last resort
       ],
     },
     REASONING: {
-      primary: "anthropic/claude-sonnet-4.6", // Strong tool use + reasoning for agentic tasks
+      primary: "google/gemini-2.5-pro", // Reasoning + tool use
       fallback: [
-        "anthropic/claude-opus-4.6",
-        "xai/grok-4-1-fast-reasoning",
-        "deepseek/deepseek-reasoner",
+        "google/gemini-3.1-pro",
+        "google/gemini-3-pro-preview",
+        "anthropic/claude-sonnet-4.6", // Last resort
       ],
     },
   },

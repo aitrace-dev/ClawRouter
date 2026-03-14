@@ -667,7 +667,20 @@ async function tryModelRequest(
       const anthropicBody = convertToAnthropicFormat(parsed);
       requestBody = Buffer.from(JSON.stringify(anthropicBody));
     } else {
-      requestBody = Buffer.from(JSON.stringify(parsed));
+      // Strip non-standard fields that providers reject (e.g. Google rejects "store")
+      const STANDARD_CHAT_FIELDS = new Set([
+        "model", "messages", "max_tokens", "temperature", "top_p", "n", "stream",
+        "stop", "presence_penalty", "frequency_penalty", "logit_bias", "logprobs",
+        "top_logprobs", "user", "tools", "tool_choice", "response_format", "seed",
+        "stream_options", "parallel_tool_calls", "service_tier", "thinking",
+      ]);
+      const cleaned: Record<string, unknown> = {};
+      for (const key of Object.keys(parsed)) {
+        if (STANDARD_CHAT_FIELDS.has(key)) {
+          cleaned[key] = parsed[key];
+        }
+      }
+      requestBody = Buffer.from(JSON.stringify(cleaned));
     }
   } catch {
     // If body isn't valid JSON, use as-is
