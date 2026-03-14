@@ -39,6 +39,11 @@ export const MODEL_ALIASES: Record<string, string> = {
   "anthropic/claude-opus-4.5": "anthropic/claude-opus-4.6",
   "anthropic/claude-haiku-4": "anthropic/claude-haiku-4.5",
   "anthropic/claude-haiku-4-5": "anthropic/claude-haiku-4.5",
+  // Legacy haiku 3.5 → current haiku 4.5
+  "anthropic/claude-haiku-3.5": "anthropic/claude-haiku-4.5",
+  "anthropic/claude-haiku-3-5": "anthropic/claude-haiku-4.5",
+  "anthropic/claude-3.5-haiku": "anthropic/claude-haiku-4.5",
+  "anthropic/claude-3-5-haiku": "anthropic/claude-haiku-4.5",
 
   // OpenAI
   gpt: "openai/gpt-4o",

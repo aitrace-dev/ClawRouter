@@ -611,6 +611,9 @@ function buildUpstreamUrl(
       "claude-opus-4": "claude-opus-4-20250514",
       "claude-opus-4.5": "claude-opus-4-20250514", // fallback
       "claude-haiku-4.5": "claude-haiku-4-20250414",
+      "claude-haiku-3.5": "claude-haiku-4-20250414",
+      "claude-3-5-haiku": "claude-haiku-4-20250414",
+      "claude-3.5-haiku": "claude-haiku-4-20250414",
     };
     const mappedModel = ANTHROPIC_MODEL_MAP[actualModelId] || actualModelId;
     return {
