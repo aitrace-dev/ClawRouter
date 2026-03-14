@@ -266,7 +266,7 @@ function stripThinkingTokens(content: string): string {
 /**
  * Convert OpenAI chat completion format to Anthropic Messages API format.
  */
-function convertToAnthropicFormat(parsed: Record<string, unknown>): Record<string, unknown> {
+export function convertToAnthropicFormat(parsed: Record<string, unknown>): Record<string, unknown> {
   const messages = (parsed.messages as ChatMessage[]) || [];
 
   // Extract system message and convert messages
@@ -399,7 +399,7 @@ function convertToAnthropicFormat(parsed: Record<string, unknown>): Record<strin
 /**
  * Convert Anthropic response to OpenAI format.
  */
-function convertAnthropicResponseToOpenAI(anthropicData: Record<string, unknown>): Record<string, unknown> {
+export function convertAnthropicResponseToOpenAI(anthropicData: Record<string, unknown>): Record<string, unknown> {
   const content = anthropicData.content as Array<{ type: string; text?: string; id?: string; name?: string; input?: unknown }> | undefined;
   const textContent = content?.filter(b => b.type === "text").map(b => b.text).join("") || "";
   const toolUseBlocks = content?.filter(b => b.type === "tool_use") || [];
@@ -475,12 +475,29 @@ function buildModelPricing(): Map<string, ModelPricing> {
 
 function mergeRoutingConfig(overrides?: Partial<RoutingConfig>): RoutingConfig {
   if (!overrides) return DEFAULT_ROUTING_CONFIG;
+
+  const mergedTiers = { ...DEFAULT_ROUTING_CONFIG.tiers, ...overrides.tiers };
+
   return {
     ...DEFAULT_ROUTING_CONFIG,
     ...overrides,
     classifier: { ...DEFAULT_ROUTING_CONFIG.classifier, ...overrides.classifier },
     scoring: { ...DEFAULT_ROUTING_CONFIG.scoring, ...overrides.scoring },
-    tiers: { ...DEFAULT_ROUTING_CONFIG.tiers, ...overrides.tiers },
+    tiers: mergedTiers,
+    // When user overrides tiers but not agenticTiers, use their tiers for agentic too.
+    // This prevents the default agenticTiers (which have Anthropic primaries) from
+    // overriding the user's provider preferences when tools are present in the request.
+    agenticTiers: overrides.agenticTiers
+      ? { ...DEFAULT_ROUTING_CONFIG.agenticTiers!, ...overrides.agenticTiers }
+      : overrides.tiers
+        ? mergedTiers
+        : DEFAULT_ROUTING_CONFIG.agenticTiers,
+    ecoTiers: overrides.ecoTiers
+      ? { ...DEFAULT_ROUTING_CONFIG.ecoTiers!, ...overrides.ecoTiers }
+      : DEFAULT_ROUTING_CONFIG.ecoTiers,
+    premiumTiers: overrides.premiumTiers
+      ? { ...DEFAULT_ROUTING_CONFIG.premiumTiers!, ...overrides.premiumTiers }
+      : DEFAULT_ROUTING_CONFIG.premiumTiers,
     overrides: { ...DEFAULT_ROUTING_CONFIG.overrides, ...overrides.overrides },
   };
 }
