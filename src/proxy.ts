@@ -1035,7 +1035,44 @@ async function proxyRequest(
           const prompt = extractText(lastUserMsg?.content);
           const systemPrompt = extractText(systemMsg?.content) || undefined;
 
+          // Detect tool execution turns: if the conversation ends with
+          // assistant(tool_calls) → tool(results), we're in a mechanical
+          // execution loop (e.g. MCP actions). These don't need expensive
+          // models — cap at MEDIUM to use flash instead of pro.
+          let isToolExecutionTurn = false;
+          if (messages && messages.length >= 2) {
+            const lastMsg = messages[messages.length - 1];
+            // Check if last message(s) are tool results
+            if (lastMsg.role === "tool") {
+              // Find the last assistant message before the tool results
+              for (let i = messages.length - 2; i >= 0; i--) {
+                if (messages[i].role === "assistant") {
+                  const assistantContent = messages[i].content;
+                  const assistantRaw = messages[i] as Record<string, unknown>;
+                  // Check for tool_calls in assistant message
+                  const hasToolCalls = Array.isArray(assistantRaw.tool_calls) && assistantRaw.tool_calls.length > 0 ||
+                    (Array.isArray(assistantContent) && (assistantContent as ContentPart[]).some((p) => p.type === "tool_use"));
+                  if (hasToolCalls) isToolExecutionTurn = true;
+                  break;
+                }
+                if (messages[i].role !== "tool") break;
+              }
+            }
+          }
+
           routingDecision = route(prompt, systemPrompt, maxTokens, routerOpts);
+
+          // Downgrade tool execution turns from COMPLEX → MEDIUM
+          // Creative work (ideation) uses pro, but mechanical tool execution (MCP clicks, paste) uses flash
+          if (isToolExecutionTurn && (routingDecision.tier === "COMPLEX" || routingDecision.tier === "REASONING")) {
+            console.log(`[ClawRouter] Tool execution turn detected, downgrading ${routingDecision.tier} → MEDIUM`);
+            routingDecision = { ...routingDecision, tier: "MEDIUM" as const, reasoning: routingDecision.reasoning + " | downgraded (tool-execution turn)" };
+            // Re-select model for MEDIUM tier
+            const useAgenticTiers = routingDecision.reasoning?.includes("agentic") && routerOpts.config.agenticTiers;
+            const tierConfigs = useAgenticTiers ? routerOpts.config.agenticTiers! : routerOpts.config.tiers;
+            const mediumConfig = tierConfigs.MEDIUM;
+            routingDecision = { ...routingDecision, model: mediumConfig.primary };
+          }
 
           // Filter to models with configured API keys (direct or via OpenRouter)
           if (!isModelAccessible(options.apiKeys, routingDecision.model)) {
