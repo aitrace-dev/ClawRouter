@@ -134,6 +134,51 @@ function isProviderError(status: number, body: string): boolean {
   return PROVIDER_ERROR_PATTERNS.some((pattern) => pattern.test(body));
 }
 
+/**
+ * Normalize provider-specific finish_reason values to OpenAI-compatible format.
+ * Google Gemini returns values like MALFORMED_FUNCTION_CALL, SAFETY, RECITATION
+ * which OpenClaw/clients don't understand.
+ */
+function normalizeFinishReason(raw: string | null | undefined): string | null {
+  if (raw == null) return null;
+  const upper = raw.toUpperCase();
+  switch (upper) {
+    case "STOP":
+    case "END_TURN":
+      return "stop";
+    case "MAX_TOKENS":
+    case "LENGTH":
+      return "length";
+    case "TOOL_CALLS":
+    case "TOOL_USE":
+    case "FUNCTION_CALL":
+      return "tool_calls";
+    case "CONTENT_FILTER":
+    case "SAFETY":
+    case "RECITATION":
+      return "content_filter";
+    case "MALFORMED_FUNCTION_CALL":
+      // Model tried to call a function but produced invalid syntax.
+      // Strip any broken tool_calls downstream; treat as normal stop.
+      return "stop";
+    default:
+      // Already a valid OpenAI finish_reason? Pass through.
+      if (["stop", "length", "tool_calls", "content_filter", "function_call"].includes(raw)) {
+        return raw;
+      }
+      // Unknown provider-specific reason — map to stop to avoid client errors
+      console.log(`[ClawRouter] Unknown finish_reason "${raw}", normalizing to "stop"`);
+      return "stop";
+  }
+}
+
+/** Check if a finish_reason indicates a soft failure worth retrying */
+function isSoftFailureFinishReason(raw: string | null | undefined): boolean {
+  if (raw == null) return false;
+  const upper = raw.toUpperCase();
+  return upper === "MALFORMED_FUNCTION_CALL" || upper === "SAFETY" || upper === "RECITATION";
+}
+
 const VALID_ROLES = new Set(["system", "user", "assistant", "tool", "function"]);
 const ROLE_MAPPINGS: Record<string, string> = { developer: "system", model: "assistant" };
 
@@ -1060,7 +1105,17 @@ async function proxyRequest(
             }
           }
 
-          routingDecision = route(prompt, systemPrompt, maxTokens, routerOpts);
+          // Pass hasTools so the router selects agentic tiers when tools are present
+          const hasToolsInRequest = Array.isArray(parsed.tools) && parsed.tools.length > 0;
+          const perRequestOpts: RouterOptions = hasToolsInRequest
+            ? { ...routerOpts, hasTools: true }
+            : routerOpts;
+          routingDecision = route(prompt, systemPrompt, maxTokens, perRequestOpts);
+
+          // Store hasTools on routingDecision for response-level retry detection
+          if (hasToolsInRequest) {
+            (routingDecision as RoutingDecision & { _hasTools?: boolean })._hasTools = true;
+          }
 
           // Downgrade tool execution turns from COMPLEX → MEDIUM
           // Creative work (ideation) uses pro, but mechanical tool execution (MCP clicks, paste) uses flash
@@ -1164,6 +1219,20 @@ async function proxyRequest(
       const result = await tryModelRequest(tryModel, requestPath, req.method ?? "POST", body, maxTokens, options.apiKeys, controller.signal);
 
       if (result.success && result.response) {
+        // Check for soft failures in 200 OK responses (e.g. MALFORMED_FUNCTION_CALL).
+        // The model "succeeded" HTTP-wise but returned an unusable response.
+        // Retry with the next model if available.
+        if (!isLastAttempt) {
+          try {
+            const cloned = result.response.clone();
+            const peek = await cloned.text();
+            if (/MALFORMED_FUNCTION_CALL|"SAFETY"|"RECITATION"/i.test(peek)) {
+              console.log(`[ClawRouter] Soft failure from ${tryModel} (response contains MALFORMED_FUNCTION_CALL/SAFETY/RECITATION), trying next model`);
+              continue;
+            }
+          } catch { /* clone/read failed, use the response as-is */ }
+        }
+
         upstream = result.response;
         actualModelUsed = tryModel;
         console.log(`[ClawRouter] Success with model: ${tryModel}`);
@@ -1230,7 +1299,7 @@ async function proxyRequest(
         // SSE can start with "data: ", "event: ", or ": " (comment/heartbeat)
         const isSSE = jsonStr.startsWith("data: ") || jsonStr.startsWith("event: ") || jsonStr.startsWith(": ");
         if (isSSE) {
-          // Already SSE format - filter out non-JSON lines (e.g. OpenRouter processing comments)
+          // Already SSE format - filter out non-JSON lines and normalize finish_reason
           const cleaned = jsonStr
             .split("\n")
             .filter((line) => {
@@ -1241,6 +1310,34 @@ async function proxyRequest(
               if (trimmed.startsWith("data: {")) return true;
               // Drop SSE comments and non-JSON data lines (e.g. ": OPENROUTER PROCESSING")
               return false;
+            })
+            .map((line) => {
+              // Normalize finish_reason in SSE data lines
+              const trimmed = line.trim();
+              if (!trimmed.startsWith("data: {")) return line;
+              try {
+                const chunk = JSON.parse(trimmed.slice(6));
+                if (chunk.choices && Array.isArray(chunk.choices)) {
+                  let modified = false;
+                  for (const choice of chunk.choices) {
+                    if (choice.finish_reason != null) {
+                      const isMalformed = choice.finish_reason.toUpperCase?.() === "MALFORMED_FUNCTION_CALL";
+                      const normalized = normalizeFinishReason(choice.finish_reason);
+                      if (normalized !== choice.finish_reason) {
+                        choice.finish_reason = normalized;
+                        modified = true;
+                      }
+                      // Strip malformed tool_calls
+                      if (isMalformed && choice.delta?.tool_calls) {
+                        delete choice.delta.tool_calls;
+                        modified = true;
+                      }
+                    }
+                  }
+                  if (modified) return `data: ${JSON.stringify(chunk)}`;
+                }
+              } catch { /* not valid JSON, pass through */ }
+              return line;
             })
             .join("\n");
           if (cleaned.trim()) {
@@ -1290,14 +1387,20 @@ async function proxyRequest(
                   responseChunks.push(Buffer.from(contentData));
                 }
 
+                // Normalize finish_reason from provider-specific to OpenAI format
+                const normalizedFinish = normalizeFinishReason(choice.finish_reason) ?? "stop";
+                const isMalformedCall = choice.finish_reason?.toUpperCase() === "MALFORMED_FUNCTION_CALL";
+
+                // Only forward tool_calls if finish_reason isn't MALFORMED_FUNCTION_CALL
+                // (malformed calls would cause downstream parse errors)
                 const toolCalls = choice.message?.tool_calls ?? choice.delta?.tool_calls;
-                if (toolCalls && (toolCalls as unknown[]).length > 0) {
+                if (toolCalls && (toolCalls as unknown[]).length > 0 && !isMalformedCall) {
                   const toolCallData = `data: ${JSON.stringify({ ...baseChunk, choices: [{ index, delta: { tool_calls: toolCalls }, logprobs: null, finish_reason: null }] })}\n\n`;
                   safeWrite(res, toolCallData);
                   responseChunks.push(Buffer.from(toolCallData));
                 }
 
-                const finishData = `data: ${JSON.stringify({ ...baseChunk, choices: [{ index, delta: {}, logprobs: null, finish_reason: choice.finish_reason ?? "stop" }] })}\n\n`;
+                const finishData = `data: ${JSON.stringify({ ...baseChunk, choices: [{ index, delta: {}, logprobs: null, finish_reason: normalizedFinish }] })}\n\n`;
                 safeWrite(res, finishData);
                 responseChunks.push(Buffer.from(finishData));
               }
@@ -1337,12 +1440,36 @@ async function proxyRequest(
       let finalBody = Buffer.concat(responseChunks);
       
       // Convert Anthropic response to OpenAI format for non-streaming
+      // and normalize finish_reason for all providers
       try {
         const rawParsed = JSON.parse(finalBody.toString());
         if (rawParsed.type === "message" && rawParsed.content) {
           const converted = convertAnthropicResponseToOpenAI(rawParsed);
           finalBody = Buffer.from(JSON.stringify(converted));
           responseHeaders["content-type"] = "application/json";
+        }
+        // Normalize finish_reason in OpenAI-format responses (covers Google, OpenRouter, etc.)
+        const parsed = JSON.parse(finalBody.toString());
+        if (parsed.choices && Array.isArray(parsed.choices)) {
+          let modified = false;
+          for (const choice of parsed.choices) {
+            if (choice.finish_reason != null) {
+              const isMalformed = typeof choice.finish_reason === "string" && choice.finish_reason.toUpperCase() === "MALFORMED_FUNCTION_CALL";
+              const normalized = normalizeFinishReason(choice.finish_reason);
+              if (normalized !== choice.finish_reason) {
+                choice.finish_reason = normalized;
+                modified = true;
+              }
+              // Strip malformed tool_calls from response
+              if (isMalformed && choice.message?.tool_calls) {
+                delete choice.message.tool_calls;
+                modified = true;
+              }
+            }
+          }
+          if (modified) {
+            finalBody = Buffer.from(JSON.stringify(parsed));
+          }
         }
       } catch { /* not JSON, pass through */ }
       
